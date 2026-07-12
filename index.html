@@ -18,53 +18,100 @@
     white-space: pre-wrap;
     background: #000;
     padding: 15px;
-    border-radius: 8px;
+    border-radius: 8px 8px 0 0;
     min-height: 300px;
     max-height: 70vh;
     overflow-y: auto;
     border: 1px solid #333;
+    border-bottom: none;
   }
+  #inputRow {
+    display: flex;
+    background: #000;
+    border: 1px solid #333;
+    border-radius: 0 0 8px 8px;
+    padding: 8px 15px;
+  }
+  #prompt-symbol { color: #4ec9b0; margin-right: 8px; }
+  #userInput {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #d4d4d4;
+    font-family: inherit;
+    font-size: 1em;
+  }
+  #userInput:disabled { opacity: 0.4; }
 </style>
 </head>
 <body>
 <h1>🎮 Mi Juego</h1>
 <div id="status">Cargando Python (puede tardar unos segundos la primera vez)...</div>
 <div id="output"></div>
+<div id="inputRow">
+  <span id="prompt-symbol">&gt;</span>
+  <input id="userInput" type="text" disabled autocomplete="off" />
+</div>
 
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.1/full/pyodide.js"></script>
 <script>
 const outputDiv = document.getElementById("output");
 const statusDiv = document.getElementById("status");
+const inputEl = document.getElementById("userInput");
+
+let inputResolve = null;
 
 function appendOutput(text) {
   outputDiv.textContent += text;
   outputDiv.scrollTop = outputDiv.scrollHeight;
 }
 
+// Se llama desde Python cuando el juego necesita pedir un dato.
+// En vez de un popup, habilita la cajita de texto de abajo y espera.
+function js_input_async(promptText) {
+  appendOutput(promptText);
+  inputEl.disabled = false;
+  inputEl.focus();
+  return new Promise((resolve) => {
+    inputResolve = resolve;
+  });
+}
+
+inputEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && inputResolve) {
+    const val = inputEl.value;
+    appendOutput(val + "\n");
+    inputEl.value = "";
+    inputEl.disabled = true;
+    const resolve = inputResolve;
+    inputResolve = null;
+    resolve(val);
+  }
+});
+
 async function main() {
   let pyodide = await loadPyodide();
   statusDiv.textContent = "Python cargado. Iniciando juego...";
 
-  // Redirige los print() del juego a la cajita negra de la página
   pyodide.setStdout({ batched: (text) => appendOutput(text + "\n") });
   pyodide.setStderr({ batched: (text) => appendOutput("[Error] " + text + "\n") });
 
-  // Función que muestra un cuadro de dialogo del navegador para pedir datos
-  pyodide.globals.set("js_input", (prompt_text) => {
-    let respuesta = window.prompt(prompt_text);
-    appendOutput((prompt_text || "") + (respuesta ?? "") + "\n");
-    return respuesta ?? "";
-  });
+  pyodide.globals.set("js_input_async", js_input_async);
 
-  // Reemplaza input() de Python por la función de arriba
   await pyodide.runPythonAsync(`
 import builtins
-builtins.input = lambda prompt="": js_input(prompt)
+async def _input(prompt=""):
+    return await js_input_async(prompt)
+builtins.input = _input
 `);
 
-  // Carga y ejecuta tu juego (debe estar en el archivo juego.py)
   const response = await fetch("juego.py");
-  const codigo = await response.text();
+  let codigo = await response.text();
+
+  // Convierte cada llamada a input( en await input( para que funcione
+  // de forma asincrónica (sin trabar el navegador).
+  codigo = codigo.replace(/(?<!await\s)\binput\(/g, "await input(");
 
   statusDiv.textContent = "";
   try {
@@ -72,6 +119,8 @@ builtins.input = lambda prompt="": js_input(prompt)
     appendOutput("\n\n--- Juego terminado ---");
   } catch (err) {
     appendOutput("\n\n[Error al ejecutar el juego] " + err);
+  } finally {
+    inputEl.disabled = true;
   }
 }
 
