@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mi Juego en Python</title>
+<style>
+  body {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    font-family: 'Consolas', 'Courier New', monospace;
+    padding: 20px;
+    max-width: 800px;
+    margin: 0 auto;
+  }
+  h1 { color: #4ec9b0; }
+  #status { color: #888; margin-bottom: 10px; }
+  #output {
+    white-space: pre-wrap;
+    background: #000;
+    padding: 15px;
+    border-radius: 8px;
+    min-height: 300px;
+    max-height: 70vh;
+    overflow-y: auto;
+    border: 1px solid #333;
+  }
+</style>
+</head>
+<body>
+<h1>🎮 Mi Juego</h1>
+<div id="status">Cargando Python (puede tardar unos segundos la primera vez)...</div>
+<div id="output"></div>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.1/full/pyodide.js"></script>
+<script>
+const outputDiv = document.getElementById("output");
+const statusDiv = document.getElementById("status");
+
+function appendOutput(text) {
+  outputDiv.textContent += text;
+  outputDiv.scrollTop = outputDiv.scrollHeight;
+}
+
+async function main() {
+  let pyodide = await loadPyodide();
+  statusDiv.textContent = "Python cargado. Iniciando juego...";
+
+  // Redirige los print() del juego a la cajita negra de la página
+  pyodide.setStdout({ batched: (text) => appendOutput(text + "\n") });
+  pyodide.setStderr({ batched: (text) => appendOutput("[Error] " + text + "\n") });
+
+  // Función que muestra un cuadro de dialogo del navegador para pedir datos
+  pyodide.globals.set("js_input", (prompt_text) => {
+    let respuesta = window.prompt(prompt_text);
+    appendOutput((prompt_text || "") + (respuesta ?? "") + "\n");
+    return respuesta ?? "";
+  });
+
+  // Reemplaza input() de Python por la función de arriba
+  await pyodide.runPythonAsync(`
+import builtins
+builtins.input = lambda prompt="": js_input(prompt)
+`);
+
+  // Carga y ejecuta tu juego (debe estar en el archivo juego.py)
+  const response = await fetch("juego.py");
+  const codigo = await response.text();
+
+  statusDiv.textContent = "";
+  try {
+    await pyodide.runPythonAsync(codigo);
+    appendOutput("\n\n--- Juego terminado ---");
+  } catch (err) {
+    appendOutput("\n\n[Error al ejecutar el juego] " + err);
+  }
+}
+
+main();
+</script>
+</body>
+</html>
